@@ -70,10 +70,35 @@ st.markdown("""
 
 # Sidebar - Navegação
 st.sidebar.title("📋 Navegação")
+
+# Inicializa a página no session_state se não existir
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "🏠 Dashboard"
+
+# Verifica se há redirecionamento pendente e atualiza
+if 'page_redirect' in st.session_state:
+    st.session_state.current_page = st.session_state.page_redirect
+    del st.session_state.page_redirect
+
+# Lista de páginas disponíveis
+pages = ["🏠 Dashboard", "📤 Upload & Pré-processamento", "🤖 Treinamento", "📈 Resultados"]
+
+# Radio button sincronizado com session_state
+try:
+    current_index = pages.index(st.session_state.current_page)
+except ValueError:
+    current_index = 0
+
 page = st.sidebar.radio(
     "Selecione uma página:",
-    ["🏠 Dashboard", "📤 Upload & Pré-processamento", "🤖 Treinamento", "📈 Resultados"]
+    pages,
+    index=current_index,
+    key="page_selector"
 )
+
+# Atualiza session_state quando o usuário muda pelo radio button
+if page != st.session_state.current_page:
+    st.session_state.current_page = page
 
 # Título principal (só mostra se não for dashboard)
 if page != "🏠 Dashboard":
@@ -250,11 +275,6 @@ if page == "🏠 Dashboard":
         st.success("✅ **Modelo treinado!** Vá para 'Resultados' para ver métricas.")
     else:
         st.info("ℹ️ Nenhum modelo treinado ainda. Vá para 'Treinamento' para treinar um modelo.")
-    
-    # Redirecionamento se necessário
-    if hasattr(st.session_state, 'page_redirect'):
-        page = st.session_state.page_redirect
-        del st.session_state.page_redirect
 
 # Página: Upload & Pré-processamento
 elif page == "📤 Upload & Pré-processamento":
@@ -604,31 +624,60 @@ elif page == "📤 Upload & Pré-processamento":
                     device_name = device_names.get(d, f"Device {d}")
                     device_options.append(f"{device_name} (Device {d})")
                 
-                selected_device_display = st.selectbox(
-                    "Selecione o Dispositivo para Treinar:",
+                # Permite selecionar múltiplos dispositivos
+                selected_devices_display = st.multiselect(
+                    "Selecione os Dispositivos para Treinar:",
                     device_options,
-                    format_func=lambda x: f"{x} - {device_counts[unique_devices[device_options.index(x)]]:,} amostras",
-                    help="Cada dispositivo terá seu próprio modelo treinado apenas com seus dados."
+                    default=device_options,  # Seleciona todos por padrão
+                    help="Cada dispositivo terá seu próprio modelo treinado apenas com seus dados. Você pode selecionar múltiplos dispositivos."
                 )
                 
-                # Extrai o número do dispositivo da seleção
-                selected_device = unique_devices[device_options.index(selected_device_display)]
-                st.session_state.selected_device = selected_device
-                st.session_state.train_by_device = True
+                # Extrai os números dos dispositivos selecionados
+                selected_devices = []
+                for display_name in selected_devices_display:
+                    import re
+                    match = re.search(r'Device (\d+)', display_name)
+                    if match:
+                        selected_devices.append(int(match.group(1)))
                 
-                # Mostra informações sobre o dispositivo selecionado
-                device_df = df[df['device'] == selected_device]
-                device_labels = device_df['label'].value_counts()
-                device_name = device_names.get(selected_device, f"Device {selected_device}")
-                
-                st.success(f"✅ **{device_name} (Device {selected_device}) selecionado:** {len(device_df):,} amostras")
-                st.markdown(f"**Distribuição de labels no {device_name}:**")
-                device_label_df = pd.DataFrame({
-                    'Label': device_labels.index,
-                    'Amostras': device_labels.values,
-                    '%': (device_labels.values / len(device_df) * 100).round(2)
-                })
-                st.dataframe(make_arrow_compatible(device_label_df), width='stretch')
+                if not selected_devices:
+                    st.warning("⚠️ Selecione pelo menos um dispositivo para treinar.")
+                else:
+                    st.session_state.selected_devices = selected_devices
+                    st.session_state.train_by_device = True
+                    
+                    # Mostra informações sobre os dispositivos selecionados
+                    st.success(f"✅ **{len(selected_devices)} dispositivo(s) selecionado(s) para treinamento:**")
+                    
+                    # Cria um resumo dos dispositivos selecionados
+                    summary_data = []
+                    for dev in selected_devices:
+                        device_df = df[df['device'] == dev]
+                        device_name = device_names.get(dev, f"Device {dev}")
+                        summary_data.append({
+                            'Dispositivo': f"{device_name} (Device {dev})",
+                            'Amostras': len(device_df),
+                            'Labels': device_df['label'].nunique() if 'label' in device_df.columns else 0
+                        })
+                    
+                    summary_df = pd.DataFrame(summary_data)
+                    st.dataframe(make_arrow_compatible(summary_df), width='stretch')
+                    
+                    # Mostra distribuição de labels para cada dispositivo
+                    with st.expander("📊 Ver distribuição de labels por dispositivo", expanded=False):
+                        for dev in selected_devices:
+                            device_df = df[df['device'] == dev]
+                            device_labels = device_df['label'].value_counts()
+                            device_name = device_names.get(dev, f"Device {dev}")
+                            
+                            st.markdown(f"**{device_name} (Device {dev}):** {len(device_df):,} amostras")
+                            device_label_df = pd.DataFrame({
+                                'Label': device_labels.index,
+                                'Amostras': device_labels.values,
+                                '%': (device_labels.values / len(device_df) * 100).round(2)
+                            })
+                            st.dataframe(make_arrow_compatible(device_label_df), width='stretch')
+                            st.markdown("---")
             else:
                 st.session_state.train_by_device = False
                 st.session_state.selected_device = None
@@ -1033,117 +1082,167 @@ elif page == "🤖 Treinamento":
                         status_text.text("Pré-processando dados...")
                         progress_bar.progress(20)
                         
-                        # Filtra por dispositivo se o modo "treinar por dispositivo" estiver ativado
+                        # Filtra por dispositivo(s) se o modo "treinar por dispositivo" estiver ativado
                         train_by_device = getattr(st.session_state, 'train_by_device', False)
-                        selected_device = getattr(st.session_state, 'selected_device', None)
+                        selected_devices = getattr(st.session_state, 'selected_devices', None)
+                        selected_device = getattr(st.session_state, 'selected_device', None)  # Mantém compatibilidade
                         
-                        df_to_use = df.copy()
-                        if train_by_device and selected_device is not None and 'device' in df.columns:
-                            df_to_use = df[df['device'] == selected_device].copy()
-                            status_text.text(f"Filtrando dados do Device {selected_device}...")
-                            st.info(f"📱 **Treinando modelo apenas para Device {selected_device}** ({len(df_to_use):,} amostras)")
-                            progress_bar.progress(25)
+                        # Inicializa dicionários para armazenar múltiplos modelos
+                        if 'models_by_device' not in st.session_state:
+                            st.session_state.models_by_device = {}
+                        if 'results_by_device' not in st.session_state:
+                            st.session_state.results_by_device = {}
+                        if 'data_by_device' not in st.session_state:
+                            st.session_state.data_by_device = {}
+                        
+                        # Determina quais dispositivos treinar
+                        devices_to_train = []
+                        if train_by_device:
+                            if selected_devices:  # Nova forma: lista de dispositivos
+                                devices_to_train = selected_devices
+                            elif selected_device is not None:  # Forma antiga: dispositivo único
+                                devices_to_train = [selected_device]
                         
                         target_col = getattr(st.session_state, 'target_column', None)
-                        if target_col is None:
-                            # Usa a função de detecção melhorada
-                            suitable_cols = find_suitable_target_columns(df_to_use)
-                            recommended = [col['column'] for col in suitable_cols if col['is_suitable'] and col['has_keyword']]
-                            if recommended:
-                                target_col = recommended[0]
-                            else:
-                                suitable = [col['column'] for col in suitable_cols if col['is_suitable']]
-                                target_col = suitable[0] if suitable else df_to_use.columns[-1]
-                        
-                        # Validação prévia antes de processar
-                        if target_col and target_col in df_to_use.columns:
-                            unique_count = df_to_use[target_col].nunique()
-                            total_count = len(df_to_use[target_col].dropna())
-                            
-                            if unique_count > max(50, total_count * 0.5):
-                                raise ValueError(
-                                    f"A coluna '{target_col}' selecionada tem {unique_count} valores únicos ({unique_count/total_count*100:.1f}% dos dados). "
-                                    f"Isso é uma variável contínua (regressão), não classificação.\n\n"
-                                    f"Por favor, volte para a página 'Exploração de Dados' e selecione uma coluna adequada para classificação:\n"
-                                    f"- Colunas com poucos valores únicos (idealmente < 50)\n"
-                                    f"- Colunas categóricas (strings) ou inteiros discretos\n"
-                                    f"- Exemplos: 'label', 'class', ou outras colunas com poucos valores distintos"
-                                )
-                        
-                        X_train, X_test, y_train, y_test, scaler, label_encoder = preprocess_data(
-                            df_to_use, target_column=target_col, test_size=test_size
-                        )
-                        
-                        # Salva informação do dispositivo usado
-                        if train_by_device and selected_device is not None:
-                            st.session_state.trained_device = selected_device
-                        
-                        # Mostra informações sobre o pré-processamento
-                        with st.expander("📊 Informações do Pré-processamento", expanded=False):
-                            col_info1, col_info2, col_info3, col_info4 = st.columns(4)
-                            with col_info1:
-                                st.metric("Features", len(X_train.columns))
-                            with col_info2:
-                                st.metric("Treino", f"{len(X_train):,}")
-                            with col_info3:
-                                st.metric("Teste", f"{len(X_test):,}")
-                            with col_info4:
-                                n_classes = len(np.unique(y_train))
-                                st.metric("Classes", n_classes)
-                            
-                            # Distribuição das classes
-                            st.markdown("**Distribuição das Classes no Treino:**")
-                            train_class_dist = pd.Series(y_train).value_counts().sort_index()
-                            st.dataframe(train_class_dist.to_frame(name="Amostras"), width='stretch')
-                            
-                            # Avisos sobre possíveis problemas
-                            if len(X_train) < 100:
-                                st.warning("⚠️ Dataset de treino muito pequeno (< 100 amostras). Métricas podem não ser confiáveis.")
-                            
-                            if n_classes < 3:
-                                st.info(f"ℹ️ Problema com {n_classes} classe(s). Poucas classes podem facilitar a classificação.")
-                            
-                            train_min = train_class_dist.min()
-                            train_max = train_class_dist.max()
-                            if train_min / train_max < 0.1:
-                                st.warning("⚠️ Dataset muito desbalanceado! A classe menor tem menos de 10% das amostras da classe maior.")
-                        
-                        st.session_state.X_train = X_train
-                        st.session_state.X_test = X_test
-                        st.session_state.y_train = y_train
-                        st.session_state.y_test = y_test
-                        st.session_state.scaler = scaler
-                        st.session_state.label_encoder = label_encoder
-                        
                         algorithm_name = st.session_state.selected_algorithm
                         algorithm_display = algorithm  # Nome para exibição
-                        status_text.text(f"Treinando modelo {algorithm_display}...")
-                        progress_bar.progress(50)
                         
-                        # Treinamento com algoritmo selecionado
-                        model = train_model(algorithm_name, X_train, y_train, **hyperparams)
-                        
-                        # Salva informações do algoritmo usado
-                        st.session_state.algorithm_display = algorithm_display
-                        
-                        st.session_state.model = model
-                        
-                        status_text.text("Avaliando modelo...")
-                        progress_bar.progress(80)
-                        
-                        # Avaliação (inclui métricas de treino para detectar overfitting)
-                        results = evaluate_model(model, X_test, y_test, label_encoder, X_train, y_train)
-                        st.session_state.results = results
-                        st.session_state.model_trained = True
+                        if devices_to_train:
+                            # Treina modelos para cada dispositivo
+                            total_devices = len(devices_to_train)
+                            device_names = getattr(st.session_state, 'device_names', {})
+                            trained_devices = []
+                            
+                            for idx, device_id in enumerate(devices_to_train):
+                                device_name = device_names.get(device_id, f"Device {device_id}")
+                                progress_pct = 20 + (idx * 70 // total_devices)
+                                status_text.text(f"Treinando {device_name} (Device {device_id})... ({idx+1}/{total_devices})")
+                                progress_bar.progress(progress_pct)
+                                
+                                df_to_use = df[df['device'] == device_id].copy()
+                                
+                                # Detecta target_col se não estiver definido
+                                if target_col is None:
+                                    suitable_cols = find_suitable_target_columns(df_to_use)
+                                    recommended = [col['column'] for col in suitable_cols if col['is_suitable'] and col['has_keyword']]
+                                    if recommended:
+                                        target_col = recommended[0]
+                                    else:
+                                        suitable = [col['column'] for col in suitable_cols if col['is_suitable']]
+                                        target_col = suitable[0] if suitable else df_to_use.columns[-1]
+                                
+                                # Validação
+                                if target_col and target_col in df_to_use.columns:
+                                    unique_count = df_to_use[target_col].nunique()
+                                    total_count = len(df_to_use[target_col].dropna())
+                                    if unique_count > max(50, total_count * 0.5):
+                                        st.warning(f"⚠️ Pulando Device {device_id}: coluna target inadequada")
+                                        continue
+                                
+                                # Pré-processamento
+                                X_train, X_test, y_train, y_test, scaler, label_encoder = preprocess_data(
+                                    df_to_use, target_column=target_col, test_size=test_size
+                                )
+                                
+                                # Treinamento
+                                model = train_model(algorithm_name, X_train, y_train, **hyperparams)
+                                
+                                # Avaliação
+                                results = evaluate_model(model, X_test, y_test, label_encoder, X_train, y_train)
+                                
+                                # Armazena no dicionário por dispositivo
+                                st.session_state.models_by_device[device_id] = model
+                                st.session_state.results_by_device[device_id] = results
+                                st.session_state.data_by_device[device_id] = {
+                                    'X_train': X_train, 'X_test': X_test,
+                                    'y_train': y_train, 'y_test': y_test,
+                                    'scaler': scaler, 'label_encoder': label_encoder
+                                }
+                                trained_devices.append(device_id)
+                            
+                            # Salva informações gerais
+                            st.session_state.trained_devices = trained_devices
+                            st.session_state.model_trained = True
+                            st.session_state.algorithm_display = algorithm_display
+                            
+                            # Para compatibilidade, salva o primeiro modelo como modelo principal
+                            if trained_devices:
+                                first_device = trained_devices[0]
+                                st.session_state.model = st.session_state.models_by_device[first_device]
+                                st.session_state.results = st.session_state.results_by_device[first_device]
+                                st.session_state.X_train = st.session_state.data_by_device[first_device]['X_train']
+                                st.session_state.X_test = st.session_state.data_by_device[first_device]['X_test']
+                                st.session_state.y_train = st.session_state.data_by_device[first_device]['y_train']
+                                st.session_state.y_test = st.session_state.data_by_device[first_device]['y_test']
+                                st.session_state.scaler = st.session_state.data_by_device[first_device]['scaler']
+                                st.session_state.label_encoder = st.session_state.data_by_device[first_device]['label_encoder']
+                                st.session_state.trained_device = first_device
+                        else:
+                            # Treina com todos os dados combinados
+                            df_to_use = df.copy()
+                            status_text.text("Usando todos os dispositivos combinados...")
+                            progress_bar.progress(25)
+                            
+                            if target_col is None:
+                                suitable_cols = find_suitable_target_columns(df_to_use)
+                                recommended = [col['column'] for col in suitable_cols if col['is_suitable'] and col['has_keyword']]
+                                if recommended:
+                                    target_col = recommended[0]
+                                else:
+                                    suitable = [col['column'] for col in suitable_cols if col['is_suitable']]
+                                    target_col = suitable[0] if suitable else df_to_use.columns[-1]
+                            
+                            # Validação prévia
+                            if target_col and target_col in df_to_use.columns:
+                                unique_count = df_to_use[target_col].nunique()
+                                total_count = len(df_to_use[target_col].dropna())
+                                if unique_count > max(50, total_count * 0.5):
+                                    raise ValueError(
+                                        f"A coluna '{target_col}' selecionada tem {unique_count} valores únicos ({unique_count/total_count*100:.1f}% dos dados). "
+                                        f"Isso é uma variável contínua (regressão), não classificação."
+                                    )
+                            
+                            X_train, X_test, y_train, y_test, scaler, label_encoder = preprocess_data(
+                                df_to_use, target_column=target_col, test_size=test_size
+                            )
+                            
+                            st.session_state.X_train = X_train
+                            st.session_state.X_test = X_test
+                            st.session_state.y_train = y_train
+                            st.session_state.y_test = y_test
+                            st.session_state.scaler = scaler
+                            st.session_state.label_encoder = label_encoder
+                            
+                            status_text.text(f"Treinando modelo {algorithm_display}...")
+                            progress_bar.progress(50)
+                            
+                            # Treinamento
+                            model = train_model(algorithm_name, X_train, y_train, **hyperparams)
+                            st.session_state.algorithm_display = algorithm_display
+                            st.session_state.model = model
+                            
+                            status_text.text("Avaliando modelo...")
+                            progress_bar.progress(80)
+                            
+                            # Avaliação
+                            results = evaluate_model(model, X_test, y_test, label_encoder, X_train, y_train)
+                            st.session_state.results = results
+                            st.session_state.model_trained = True
                         
                         progress_bar.progress(100)
-                        status_text.text("✅ Modelo treinado com sucesso!")
+                        if devices_to_train:
+                            status_text.text(f"✅ {len(devices_to_train)} modelo(s) treinado(s) com sucesso!")
+                        else:
+                            status_text.text("✅ Modelo treinado com sucesso!")
                         
                         time.sleep(0.5)
                         progress_bar.empty()
                         status_text.empty()
                         
-                        st.success("✅ Modelo treinado e avaliado com sucesso!")
+                        if devices_to_train:
+                            st.success(f"✅ **{len(devices_to_train)} modelo(s) treinado(s) e avaliado(s) com sucesso!**")
+                        else:
+                            st.success("✅ Modelo treinado e avaliado com sucesso!")
                         st.balloons()
                         
                         # Opção de salvar modelo
@@ -1276,23 +1375,70 @@ elif page == "📈 Resultados":
         
         # Informações do modelo
         st.subheader("1. Informações do Modelo")
-        col_info1, col_info2 = st.columns(2)
-        with col_info1:
-            st.metric("Algoritmo Utilizado", algorithm_display)
-            # Mostra dispositivo se foi treinado por dispositivo
-            trained_device = getattr(st.session_state, 'trained_device', None)
+        
+        # Verifica se há múltiplos modelos treinados
+        trained_devices = getattr(st.session_state, 'trained_devices', None)
+        models_by_device = getattr(st.session_state, 'models_by_device', {})
+        
+        if trained_devices and len(trained_devices) > 1:
+            # Múltiplos modelos treinados
             device_names = getattr(st.session_state, 'device_names', {})
-            train_by_device = getattr(st.session_state, 'train_by_device', False)
+            st.info(f"📱 **{len(trained_devices)} modelos treinados** para os seguintes dispositivos:")
             
-            if train_by_device and trained_device is not None:
-                device_name = device_names.get(trained_device, f"Device {trained_device}")
-                st.info(f"📱 Modelo treinado para **{device_name} (Device {trained_device})** (modelo por dispositivo)")
-            elif not train_by_device:
-                st.info(f"📱 Modelo treinado com **todos os dispositivos combinados**")
-        with col_info2:
-            model = st.session_state.model
-            if hasattr(model, 'n_estimators'):
-                st.metric("Número de Estimadores", model.n_estimators)
+            for device_id in trained_devices:
+                device_name = device_names.get(device_id, f"Device {device_id}")
+                st.markdown(f"- **{device_name} (Device {device_id})**")
+            
+            # Seleção de qual modelo visualizar
+            device_options = []
+            for device_id in trained_devices:
+                device_name = device_names.get(device_id, f"Device {device_id}")
+                device_options.append(f"{device_name} (Device {device_id})")
+            
+            selected_device_display = st.selectbox(
+                "Selecione o dispositivo para visualizar resultados:",
+                device_options,
+                key="results_device_selector"
+            )
+            
+            # Extrai o device_id selecionado
+            import re
+            match = re.search(r'Device (\d+)', selected_device_display)
+            if match:
+                selected_device_id = int(match.group(1))
+                # Atualiza os dados do session_state para o dispositivo selecionado
+                if selected_device_id in models_by_device:
+                    st.session_state.model = models_by_device[selected_device_id]
+                    st.session_state.results = st.session_state.results_by_device[selected_device_id]
+                    device_data = st.session_state.data_by_device[selected_device_id]
+                    st.session_state.X_train = device_data['X_train']
+                    st.session_state.X_test = device_data['X_test']
+                    st.session_state.y_train = device_data['y_train']
+                    st.session_state.y_test = device_data['y_test']
+                    st.session_state.scaler = device_data['scaler']
+                    st.session_state.label_encoder = device_data['label_encoder']
+                    st.session_state.trained_device = selected_device_id
+                    results = st.session_state.results
+                    model = st.session_state.model
+        else:
+            # Modelo único ou todos combinados
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.metric("Algoritmo Utilizado", algorithm_display)
+                # Mostra dispositivo se foi treinado por dispositivo
+                trained_device = getattr(st.session_state, 'trained_device', None)
+                device_names = getattr(st.session_state, 'device_names', {})
+                train_by_device = getattr(st.session_state, 'train_by_device', False)
+                
+                if train_by_device and trained_device is not None:
+                    device_name = device_names.get(trained_device, f"Device {trained_device}")
+                    st.info(f"📱 Modelo treinado para **{device_name} (Device {trained_device})** (modelo por dispositivo)")
+                elif not train_by_device:
+                    st.info(f"📱 Modelo treinado com **todos os dispositivos combinados**")
+            with col_info2:
+                model = st.session_state.model
+                if hasattr(model, 'n_estimators'):
+                    st.metric("Número de Estimadores", model.n_estimators)
         
         # Métricas principais
         st.subheader("2. Métricas de Desempenho")
