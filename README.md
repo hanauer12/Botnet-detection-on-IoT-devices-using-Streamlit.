@@ -5,8 +5,7 @@ Aplicação interativa em Streamlit para detecção de ataques de botnet em disp
 ## 🚀 Instalação e Execução
 
 ### Pré-requisitos
-- Python 3.8+
-- Conta Kaggle configurada
+- Python 3.10+
 
 ### Passos
 

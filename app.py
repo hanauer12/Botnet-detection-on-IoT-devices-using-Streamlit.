@@ -1,8 +1,3 @@
-"""
-Aplicação Streamlit para Detecção de Botnets IoT
-Utiliza o dataset N-BaIoT para treinar e avaliar modelos de classificação
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -30,10 +25,8 @@ def make_arrow_compatible(df):
     """
     df_copy = df.copy()
     
-    # Converte tipos object que podem causar problemas
     for col in df_copy.columns:
         if df_copy[col].dtype == 'object':
-            # Tenta converter para string se possível
             try:
                 df_copy[col] = df_copy[col].astype(str)
             except:
@@ -71,19 +64,15 @@ st.markdown("""
 # Sidebar - Navegação
 st.sidebar.title("📋 Navegação")
 
-# Inicializa a página no session_state se não existir
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "🏠 Dashboard"
 
-# Verifica se há redirecionamento pendente e atualiza
 if 'page_redirect' in st.session_state:
     st.session_state.current_page = st.session_state.page_redirect
     del st.session_state.page_redirect
 
-# Lista de páginas disponíveis
 pages = ["🏠 Dashboard", "📤 Upload & Pré-processamento", "🤖 Treinamento", "📈 Resultados"]
 
-# Radio button sincronizado com session_state
 try:
     current_index = pages.index(st.session_state.current_page)
 except ValueError:
@@ -96,16 +85,13 @@ page = st.sidebar.radio(
     key="page_selector"
 )
 
-# Atualiza session_state quando o usuário muda pelo radio button
 if page != st.session_state.current_page:
     st.session_state.current_page = page
 
-# Título principal (só mostra se não for dashboard)
 if page != "🏠 Dashboard":
     st.markdown('<h1 class="main-header">🛡️ N-BaIoT Intrusion Detection Lab</h1>', unsafe_allow_html=True)
     st.markdown("---")
 
-# Inicialização de variáveis de sessão
 if 'dataset_loaded' not in st.session_state:
     st.session_state.dataset_loaded = False
 if 'data' not in st.session_state:
@@ -133,7 +119,6 @@ if 'dataset_path' not in st.session_state:
 if 'auto_download_attempted' not in st.session_state:
     st.session_state.auto_download_attempted = False
 
-# Função para fazer download do dataset
 def download_dataset():
     """Faz o download do dataset do Kaggle"""
     try:
@@ -144,12 +129,9 @@ def download_dataset():
     except Exception as e:
         return None, str(e)
 
-# Download automático do dataset na primeira execução
-# Mostra um banner no topo da página se o dataset ainda não foi baixado
 if not st.session_state.dataset_path and not st.session_state.auto_download_attempted:
     st.session_state.auto_download_attempted = True
     
-    # Container destacado para o download
     with st.container():
         st.markdown("---")
         st.markdown("### 🔄 Download Automático do Dataset")
@@ -225,7 +207,6 @@ if page == "🏠 Dashboard":
     
     st.markdown("---")
     
-    # Indicadores/Estatísticas
     st.subheader("📊 Indicadores do Sistema")
     
     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
@@ -258,7 +239,6 @@ if page == "🏠 Dashboard":
     
     st.markdown("---")
     
-    # Status e informações
     st.subheader("ℹ️ Status do Sistema")
     
     if st.session_state.dataset_path:
@@ -280,10 +260,8 @@ if page == "🏠 Dashboard":
 elif page == "📤 Upload & Pré-processamento":
     st.header("📤 Upload & Pré-processamento")
     
-    # Seção de carregamento
     st.subheader("📤 Carregamento")
     
-    # Opções de carregamento
     with st.expander("⚙️ Opções de Carregamento", expanded=True):
         st.markdown("### 📋 Configurações de Carregamento")
         
@@ -835,13 +813,13 @@ elif page == "🤖 Treinamento":
             **Baseado em pesquisas e melhores práticas para o dataset N-BaIoT:**
             
             **Random Forest:**
-            - **n_estimators**: 50-200 (valores menores reduzem overfitting)
-            - **max_depth**: 10-20 (profundidade moderada)
+            - **n_estimators**: 20-40 (valores menores reduzem overfitting)
+            - **max_depth**: 3-15 (profundidade moderada)
             - **min_samples_split**: 2-5
             - **min_samples_leaf**: 1-2
             
             **XGBoost:**
-            - **n_estimators**: 50-200
+            - **n_estimators**: 15-30
             - **max_depth**: 3-8 (valores menores são mais conservadores)
             - **learning_rate**: 0.01-0.1 (valores menores = menos overfitting)
             - **subsample**: 0.7-0.9 (reduz overfitting)
